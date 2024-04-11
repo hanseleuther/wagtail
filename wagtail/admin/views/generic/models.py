@@ -42,7 +42,6 @@ from wagtail.admin.ui.tables import (
 from wagtail.admin.utils import get_latest_str, get_valid_next_url_from_request
 from wagtail.admin.views.mixins import SpreadsheetExportMixin
 from wagtail.admin.widgets.button import (
-    Button,
     ButtonWithDropdown,
     HeaderButton,
     ListingButton,
@@ -234,7 +233,7 @@ class IndexView(
             query |= Q(**{field + "__icontains": self.search_query})
         return queryset.filter(query)
 
-    def _get_title_column(self, field_name, column_class=TitleColumn, **kwargs):
+    def _get_title_column_class(self, column_class):
         if not issubclass(column_class, ButtonsColumnMixin):
 
             def get_buttons(column, instance, *args, **kwargs):
@@ -245,6 +244,10 @@ class IndexView(
                 (ButtonsColumnMixin, column_class),
                 {"get_buttons": get_buttons},
             )
+        return column_class
+
+    def _get_title_column(self, field_name, column_class=TitleColumn, **kwargs):
+        column_class = self._get_title_column_class(column_class)
         if not self.model:
             return column_class(
                 "name",
@@ -366,29 +369,6 @@ class IndexView(
                     icon_name="plus",
                 )
             )
-        return buttons
-
-    @cached_property
-    def header_more_buttons(self):
-        buttons = []
-        if self.list_export:
-            buttons.append(
-                Button(
-                    _("Download XLSX"),
-                    url=self.xlsx_export_url,
-                    icon_name="download",
-                    priority=90,
-                )
-            )
-            buttons.append(
-                Button(
-                    _("Download CSV"),
-                    url=self.csv_export_url,
-                    icon_name="download",
-                    priority=100,
-                )
-            )
-
         return buttons
 
     def get_list_more_buttons(self, instance):
@@ -691,7 +671,7 @@ class CreateView(
 
 class CopyView(CreateView):
     def get_object(self, queryset=None):
-        return get_object_or_404(self.model, pk=self.kwargs["pk"])
+        return get_object_or_404(self.model, pk=unquote(str(self.kwargs["pk"])))
 
     def get_form_kwargs(self):
         return {**super().get_form_kwargs(), "instance": self.get_object()}
@@ -742,7 +722,7 @@ class EditView(
         return super().get_object(queryset)
 
     def get_page_subtitle(self):
-        return str(self.object)
+        return get_latest_str(self.object)
 
     def get_breadcrumbs_items(self):
         if not self.model:
@@ -755,7 +735,7 @@ class EditView(
                     "label": capfirst(self.model._meta.verbose_name_plural),
                 }
             )
-        items.append({"url": "", "label": get_latest_str(self.object)})
+        items.append({"url": "", "label": self.get_page_subtitle()})
         return self.breadcrumbs_items + items
 
     def get_side_panels(self):
@@ -777,7 +757,11 @@ class EditView(
         return MediaContainer(side_panels)
 
     def get_last_updated_info(self):
-        return log_registry.get_logs_for_instance(self.object).first()
+        return (
+            log_registry.get_logs_for_instance(self.object)
+            .select_related("user")
+            .first()
+        )
 
     def get_edit_url(self):
         if not self.edit_url_name:
